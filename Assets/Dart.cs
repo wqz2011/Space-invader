@@ -3,29 +3,29 @@ using UnityEngine;
 public class Dart : MonoBehaviour
 {
     [Header("Inscribed")]
-    static float speed = .3f;
-    
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        
-    }
+    public float speed = 15f;
+    public float maxDistance = 25f;
 
-    // Update is called once per frame
-    void Update()
+    [Header("Dynamic")]
+    // Set once the dart has hit something, so one dart can't destroy two targets in the same physics step.
+    public bool spent = false;
+
+    Rigidbody rb;
+    Vector3 startPosition;
+
+    void Awake()
     {
-        
+        rb = GetComponent<Rigidbody>();
+        startPosition = transform.position;
     }
 
     void FixedUpdate()
     {
-        Vector3 position = transform.position;
-        position.y += speed;
-        transform.position = position;
-        if(position.y > 10)
+        // Darts fly along their own "up" so multi-shot darts can be fired at an angle.
+        rb.MovePosition(rb.position + transform.up * speed * Time.fixedDeltaTime);
+        if ((rb.position - startPosition).sqrMagnitude > maxDistance * maxDistance)
         {
             Destroy(gameObject);
         }
     }
-
 }
