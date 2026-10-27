@@ -16,7 +16,7 @@
 | Left / Right arrows, or A / D | Move the ship |
 | Space | Fire (hold during Rapid Fire) |
 | Space / Enter | Start the game; play again after winning or losing |
-| Esc | Quit (in a built game) |
+| Esc | Quit at any time (in the Unity editor, this stops Play mode) |
 
 ---
 

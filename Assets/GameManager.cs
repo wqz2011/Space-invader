@@ -81,8 +81,18 @@ public class GameManager : MonoBehaviour
 
         if (keyboard.escapeKey.wasPressedThisFrame)
         {
-            Application.Quit();
+            Quit();
         }
+    }
+
+    // Application.Quit is ignored inside the Unity editor, so there Esc stops Play mode instead.
+    static void Quit()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     void StartGame()
