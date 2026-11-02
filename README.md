@@ -38,7 +38,7 @@ All four are from the assignment's list:
 
 | Option | What was done | Where |
 |---|---|---|
-| **Add a starting and ending screen** | A title screen with controls and a power-up legend. A **YOU WIN** screen with your clear time and a **GAME OVER** screen with the reason and aliens remaining. Space/Enter plays again. The game is paused behind each screen. | `GameManager` |
+| **Add a starting and ending screen** | Arcade-style screens to match the pixel art: a framed box with all-caps, widely spaced text in the game's colors and a blinking "PRESS SPACE" prompt. The title screen shows the controls and a power-up legend. The **YOU WIN** screen shows your clear time, and the **GAME OVER** screen shows the reason and the aliens left. Space/Enter plays again. The game is paused behind each screen. | `GameManager` |
 | **Replace the background** | A pixel-art picture of Earth and the Moon, matching the pixel-art ships, shown on an unlit quad behind the play area and scaled to fill the screen without stretching. The camera clears to black. *(Image AI-generated with Google Gemini.)* | `Background`, `Assets/Resources/SpaceBackground.jpg` |
 | **Add animations when collisions occur** | Every destruction plays an explosion: tumbling cube debris in the destroyed object's color plus a short flash of light. Used for aliens, the spaceship (larger), alien bullets shot down by darts, and collected power-ups. | `Explosion`, `Debris` |
 | **Replace the aliens and spaceship with better graphics** | 3D "voxel" versions of the classic arcade sprites. There are three alien types with two-frame marching animations, a voxel fighter ship, and red zigzag alien bullets. Details below. | `VoxelModel`, `Alien`, `Spaceship`, `AlienBullet` |
