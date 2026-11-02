@@ -1,32 +1,33 @@
 using UnityEngine;
 
-// Shows the game's generated visuals (background picture, voxel aliens and spaceship) in the editor before
-// pressing Play. Those visuals are normally built by the scripts at runtime, so without this the scene would show
-// the original capsule ship, no aliens and the default sky.
+// Shows the background, the aliens and the pixel-art ship in the editor BEFORE you press Play.
+// Normally the scripts only make those once the game starts, so the scene would show the old capsule ship,
+// no aliens and the default sky.
 //
-// Everything built here is hidden and marked "don't save", so it never ends up in the scene file, and it is
-// removed before Play mode starts, when the real game objects get built instead.
+// [ExecuteAlways] makes Unity run this script in the editor too, not only in Play mode.
+// Everything it makes is hidden and never saved into the scene, and it's all removed when you press Play
+// (then the real game objects get made instead).
 [ExecuteAlways]
 public class EditModePreview : MonoBehaviour
 {
 #if UNITY_EDITOR
-    Transform root, fleetPreview, shipPreview;
-    Spaceship ship;
+    GameObject preview;
+    Transform fleetPreview;
+    Transform shipPreview;
     AlienFleet fleet;
-    Renderer[] hiddenShipParts = new Renderer[0];
-    int builtHash;
+    Spaceship ship;
 
     void OnEnable()
     {
         if (!Application.isPlaying)
         {
-            Build();
+            MakePreview();
         }
     }
 
     void OnDisable()
     {
-        Clear();
+        RemovePreview();
     }
 
     void Update()
@@ -35,151 +36,138 @@ public class EditModePreview : MonoBehaviour
         {
             return;
         }
-        // Rebuild when a setting that changes the preview is edited in the Inspector.
-        if (SettingsHash() != builtHash)
-        {
-            Clear();
-            Build();
-        }
-        // Follow the real objects if they are moved in the Scene view.
-        if (fleetPreview != null && fleet != null)
+
+        // If the real fleet or ship gets moved in the Scene view, move the preview with it.
+        if (fleet != null && fleetPreview != null)
         {
             fleetPreview.position = fleet.transform.position;
         }
-        if (shipPreview != null && ship != null)
+        if (ship != null && shipPreview != null)
         {
             shipPreview.position = ship.transform.position;
         }
     }
 
-    void Build()
+    void MakePreview()
     {
-        ship = FindAnyObjectByType<Spaceship>();
-        fleet = FindAnyObjectByType<AlienFleet>();
-        builtHash = SettingsHash();
-        root = new GameObject("EditModePreview").transform;
+        preview = new GameObject("Preview");
 
-        Starfield.Create().transform.SetParent(root, false);
-
-        if (fleet != null && fleet.alienPrefab != null)
+        GameObject background = Background.Create();
+        if (background != null)
         {
-            BuildFleet();
+            background.transform.SetParent(preview.transform, true);
         }
+
+        fleet = FindAnyObjectByType<AlienFleet>();
+        if (fleet != null)
+        {
+            MakeFleetPreview();
+        }
+
+        ship = FindAnyObjectByType<Spaceship>();
         if (ship != null)
         {
-            BuildShip();
+            MakeShipPreview();
         }
 
-        // Hide from the Hierarchy and never save: this is only a preview.
-        foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+        // Hide everything we made: it doesn't show in the Hierarchy and never gets saved into the scene.
+        foreach (Transform child in preview.GetComponentsInChildren<Transform>(true))
         {
-            t.gameObject.hideFlags = HideFlags.HideAndDontSave;
-        }
-        foreach (Renderer r in root.GetComponentsInChildren<Renderer>(true))
-        {
-            foreach (Material m in r.sharedMaterials)
-            {
-                if (m != null && !UnityEditor.EditorUtility.IsPersistent(m))
-                {
-                    m.hideFlags = HideFlags.HideAndDontSave;
-                }
-            }
+            child.gameObject.hideFlags = HideFlags.HideAndDontSave;
         }
     }
 
-    void BuildFleet()
+    // Puts a still alien in every spot the real fleet will fill when the game starts.
+    void MakeFleetPreview()
     {
-        Alien alienPrefab = fleet.alienPrefab.GetComponent<Alien>();
-        Material baseMaterial = fleet.alienPrefab.GetComponent<Renderer>().sharedMaterial;
-        Material[] materials = new Material[3];
-
         fleetPreview = new GameObject("Fleet").transform;
-        fleetPreview.SetParent(root, false);
+        fleetPreview.SetParent(preview.transform, false);
         fleetPreview.position = fleet.transform.position;
 
-        for (int i = 0; i < fleet.columns; i++)
+        Alien prefabAlien = fleet.alienPrefab.GetComponent<Alien>();
+        Material prefabMaterial = fleet.alienPrefab.GetComponent<Renderer>().sharedMaterial;
+        // Only the first pose is needed, since the preview doesn't animate.
+        Mesh squidMesh = VoxelModel.Build(Alien.GetShape(AlienType.Squid, 0), 'X', prefabAlien.pixelSize, prefabAlien.depth);
+        Mesh crabMesh = VoxelModel.Build(Alien.GetShape(AlienType.Crab, 0), 'X', prefabAlien.pixelSize, prefabAlien.depth);
+        Mesh octopusMesh = VoxelModel.Build(Alien.GetShape(AlienType.Octopus, 0), 'X', prefabAlien.pixelSize, prefabAlien.depth);
+
+        for (int col = 0; col < fleet.columns; col++)
         {
-            for (int j = 0; j < fleet.rows; j++)
+            for (int row = 0; row < fleet.rows; row++)
             {
-                AlienType type = fleet.TypeForRow(j);
-                int t = (int)type;
-                if (materials[t] == null)
+                AlienType type = fleet.GetTypeForRow(row);
+                Mesh mesh = squidMesh;
+                if (type == AlienType.Crab)
                 {
-                    materials[t] = new Material(baseMaterial) { color = Alien.ColorFor(type) };
+                    mesh = crabMesh;
+                }
+                else if (type == AlienType.Octopus)
+                {
+                    mesh = octopusMesh;
                 }
 
-                GameObject alien = new GameObject("Alien", typeof(MeshFilter), typeof(MeshRenderer));
+                GameObject alien = new GameObject("Alien");
                 alien.transform.SetParent(fleetPreview, false);
-                alien.transform.localPosition = fleet.SlotPosition(i, j);
+                alien.transform.localPosition = fleet.GetStartPosition(col, row);
                 alien.transform.localScale = fleet.alienPrefab.transform.localScale;
-                alien.GetComponent<MeshFilter>().sharedMesh = alienPrefab.MeshFor(type, 0);
-                alien.GetComponent<MeshRenderer>().sharedMaterial = materials[t];
+
+                Material material = new Material(prefabMaterial);
+                material.color = Alien.GetColor(type);
+                alien.AddComponent<MeshFilter>().sharedMesh = mesh;
+                alien.AddComponent<MeshRenderer>().sharedMaterial = material;
             }
         }
     }
 
-    void BuildShip()
+    void MakeShipPreview()
     {
-        shipPreview = new GameObject("Spaceship").transform;
-        shipPreview.SetParent(root, false);
+        shipPreview = new GameObject("Ship").transform;
+        shipPreview.SetParent(preview.transform, false);
         shipPreview.position = ship.transform.position;
-        ship.BuildModel(shipPreview, ship.PrefabHullMaterial);
+        ship.BuildModel(shipPreview, ship.GetOriginalMaterial());
 
-        // Hide the original capsule parts while previewing. forceRenderingOff isn't saved with the scene.
-        hiddenShipParts = ship.GetComponentsInChildren<Renderer>(true);
-        foreach (Renderer r in hiddenShipParts)
+        // Hide the old capsule parts while previewing. (forceRenderingOff isn't saved with the scene.)
+        foreach (Renderer part in ship.GetComponentsInChildren<Renderer>(true))
         {
-            r.forceRenderingOff = true;
+            part.forceRenderingOff = true;
         }
     }
 
-    void Clear()
+    void RemovePreview()
     {
-        foreach (Renderer r in hiddenShipParts)
+        // Show the capsule parts again.
+        if (ship != null)
         {
-            if (r != null)
+            foreach (Renderer part in ship.GetComponentsInChildren<Renderer>(true))
             {
-                r.forceRenderingOff = false;
+                part.forceRenderingOff = false;
             }
         }
-        hiddenShipParts = new Renderer[0];
 
-        if (root == null)
+        if (preview == null)
         {
             return;
         }
-        foreach (Renderer r in root.GetComponentsInChildren<Renderer>(true))
+
+        // Meshes and materials made in code aren't removed along with the objects, so delete them by hand.
+        // (IsPersistent means it's a real file in the project, like the quad mesh. Those must not be deleted.)
+        foreach (MeshFilter filter in preview.GetComponentsInChildren<MeshFilter>(true))
         {
-            foreach (Material m in r.sharedMaterials)
+            if (filter.sharedMesh != null && !UnityEditor.EditorUtility.IsPersistent(filter.sharedMesh))
             {
-                if (m != null && !UnityEditor.EditorUtility.IsPersistent(m))
-                {
-                    DestroyImmediate(m);
-                }
+                DestroyImmediate(filter.sharedMesh);
             }
         }
-        DestroyImmediate(root.gameObject);
-        root = null;
-    }
+        foreach (Renderer part in preview.GetComponentsInChildren<Renderer>(true))
+        {
+            if (part.sharedMaterial != null && !UnityEditor.EditorUtility.IsPersistent(part.sharedMaterial))
+            {
+                DestroyImmediate(part.sharedMaterial);
+            }
+        }
 
-    // Combines the settings that affect the preview, so Update can tell when it needs rebuilding.
-    int SettingsHash()
-    {
-        int hash = Camera.main != null ? Camera.main.aspect.GetHashCode() : 0;
-        if (fleet != null)
-        {
-            hash = hash * 31 + fleet.columns;
-            hash = hash * 31 + fleet.rows;
-            hash = hash * 31 + fleet.spacing.GetHashCode();
-            hash = hash * 31 + fleet.firstRowHeight.GetHashCode();
-        }
-        if (ship != null)
-        {
-            hash = hash * 31 + ship.pixelSize.GetHashCode();
-            hash = hash * 31 + ship.depth.GetHashCode();
-            hash = hash * 31 + ship.hullTint.GetHashCode();
-        }
-        return hash;
+        DestroyImmediate(preview);
+        preview = null;
     }
 #endif
 }

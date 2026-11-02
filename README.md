@@ -27,9 +27,9 @@
 
 | Requirement | How it's met | Where |
 |---|---|---|
-| **Make the remaining aliens speed up as their compatriots are destroyed** | Fleet speed grows with the fraction of aliens destroyed: from `baseSpeed` (4 units/s) with a full fleet to `maxSpeedMultiplier` × that (20 units/s) for the last alien. The marching animation also speeds up to match. | `AlienFleet.CurrentSpeed`, `AlienFleet.Animate` |
+| **Make the remaining aliens speed up as their compatriots are destroyed** | Fleet speed grows with the fraction of aliens destroyed: from `baseSpeed` (4 units/s) with a full fleet to `maxSpeedMultiplier` × that (20 units/s) for the last alien. The marching animation also speeds up to match. | `AlienFleet.GetSpeed`, `AlienFleet.AnimateAliens` |
 | **Detect when the aliens have reached a point where the game can no longer be won** | Every physics step the fleet measures its lowest alien. Once the bottom of the fleet reaches the top of the spaceship, the ship can't escape, so the game ends with "GAME OVER – The aliens have landed!". | `AlienFleet.FixedUpdate`, `GameManager.Lose` |
-| **Prevent the spaceship from moving offscreen** | The ship's x position is clamped to the camera's visible width, minus how far the ship's model extends left and right. It's computed from the camera every frame, so it works at any window size or aspect ratio. | `Spaceship.ClampToScreen` |
+| **Prevent the spaceship from moving offscreen** | The ship's x position is clamped to the camera's visible width, minus how far the ship's model extends left and right. It's computed from the camera every frame, so it works at any window size or aspect ratio. | `Spaceship.Move` |
 | **Find at least three ways the code is inefficient, non-idiomatic or poorly written, and fix them** | Six issues were found and fixed (see below). | see [Code issues fixed](#code-issues-found-and-fixed) |
 
 ### Chosen improvements (four required)
@@ -39,8 +39,8 @@ All four are from the assignment's list:
 | Option | What was done | Where |
 |---|---|---|
 | **Add a starting and ending screen** | A title screen with controls and a power-up legend. A **YOU WIN** screen with your clear time and a **GAME OVER** screen with the reason and aliens remaining. Space/Enter plays again. The game is paused behind each screen. | `GameManager` |
-| **Replace the background** | A pixel-art picture of Earth and the Moon, matching the pixel-art ships, shown on an unlit quad behind the play area and scaled to fill the screen without stretching. The camera clears to black. *(Image AI-generated with Google Gemini.)* | `Starfield`, `Assets/Resources/SpaceBackground.jpg` |
-| **Add animations when collisions occur** | Every destruction plays an explosion: tumbling cube debris in the destroyed object's color plus a short flash of light. Used for aliens, the spaceship (larger), alien bullets shot down by darts, and collected power-ups. | `Explosion` |
+| **Replace the background** | A pixel-art picture of Earth and the Moon, matching the pixel-art ships, shown on an unlit quad behind the play area and scaled to fill the screen without stretching. The camera clears to black. *(Image AI-generated with Google Gemini.)* | `Background`, `Assets/Resources/SpaceBackground.jpg` |
+| **Add animations when collisions occur** | Every destruction plays an explosion: tumbling cube debris in the destroyed object's color plus a short flash of light. Used for aliens, the spaceship (larger), alien bullets shot down by darts, and collected power-ups. | `Explosion`, `Debris` |
 | **Replace the aliens and spaceship with better graphics** | 3D "voxel" versions of the classic arcade sprites. There are three alien types with two-frame marching animations, a voxel fighter ship, and red zigzag alien bullets. Details below. | `VoxelModel`, `Alien`, `Spaceship`, `AlienBullet` |
 
 ### Extras beyond the requirements
@@ -78,7 +78,7 @@ All four are from the assignment's list:
 - After a win or loss, the final explosion plays for 1.5 s before the end screen appears. "Play again" reloads the scene and skips the title screen.
 
 ### Graphics
-- **`VoxelModel` (new):** turns a pixel-art pattern written as strings (`X` = a cube) into a single 3D mesh. Faces hidden between neighboring cubes are skipped, and each pattern is built once and cached, so a voxel alien costs no more to draw than the old sphere.
+- **`VoxelModel` (new):** turns a pixel-art pattern written as strings (`X` = a cube) into a single 3D mesh, by placing one cube per pixel and merging them with Unity's `CombineMeshes`. The fleet builds each alien kind's meshes once and shares them between all aliens of that kind.
 - **Aliens:** pink **squids** (top row), green **crabs** (middle) and cyan **octopuses** (bottom), each with two poses that alternate as the fleet marches. The hitbox is a box fitted to the shape.
 - **Spaceship:** a voxel fighter with a white hull, cyan cockpit, red wing lights and flickering orange engines. Same pixel size as the aliens. Darts now launch from the nose.
 - **Alien bullets:** bright red, unlit zigzag bolts that wiggle as they fall, easy to see against the dark blue background.
@@ -119,13 +119,13 @@ Active power-ups and their remaining seconds are shown in the top-right corner.
   - Removed the duplicate Spaceship Rigidbody.
   - The camera clears to solid black.
   - The alien counter is anchored to the top-left corner (it was positioned off-center).
-- **New assets in `Assets/Resources`:** `SpaceBackground.jpg` (background picture), `BackgroundUnlit.mat` (unlit material for the picture, engines and bullets) and `ParticleUnlit.mat` (explosion debris).
+- **New assets in `Assets/Resources`:** `SpaceBackground.jpg` (background picture), and `BackgroundUnlit.mat` (unlit material for the picture, the ship's engines, the alien bullets and the explosion debris).
 
 ### Files
 | File | Status |
 |---|---|
 | `Alien.cs`, `AlienBullet.cs`, `AlienCounter.cs`, `AlienFleet.cs`, `Dart.cs`, `Spaceship.cs` | Modified |
-| `GameManager.cs`, `Explosion.cs`, `PowerUp.cs`, `Starfield.cs`, `VoxelModel.cs`, `EditModePreview.cs` | New |
+| `GameManager.cs`, `Explosion.cs`, `Debris.cs`, `PowerUp.cs`, `Background.cs`, `VoxelModel.cs`, `EditModePreview.cs` | New |
 
 ---
 

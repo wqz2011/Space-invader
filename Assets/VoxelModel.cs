@@ -1,95 +1,43 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// Builds a blocky 3D mesh from a "pixel art" pattern, like the sprites of the original arcade game.
-// Each row is a string; every character equal to `cell` becomes one cube. Faces hidden between
-// neighboring cubes are skipped, and meshes are cached so each pattern is only built once.
+// Turns a small "pixel art" picture into a 3D model made of cubes.
+// The picture is an array of strings, one string per row. Every character that matches
+// "cell" becomes a cube. For example "X" might be the hull and "." empty space.
 public static class VoxelModel
 {
-    static readonly Dictionary<string, Mesh> cache = new Dictionary<string, Mesh>();
-    static readonly Vector3[] directions =
-    {
-        Vector3.right, Vector3.left, Vector3.up, Vector3.down, Vector3.forward, Vector3.back
-    };
-
     public static Mesh Build(string[] rows, char cell, float pixelSize, float depth)
     {
-        string key = string.Join("/", rows) + "|" + cell + "|" + pixelSize + "|" + depth;
-        // Meshes made at runtime can be unloaded on a scene change, so check the cached one still exists.
-        if (cache.TryGetValue(key, out Mesh cached) && cached != null)
-        {
-            return cached;
-        }
+        Mesh cube = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+        List<CombineInstance> cubes = new List<CombineInstance>();
 
-        int height = rows.Length, width = 0;
-        foreach (string row in rows)
-        {
-            width = Mathf.Max(width, row.Length);
-        }
+        int height = rows.Length;
+        int width = rows[0].Length;
 
-        List<Vector3> vertices = new List<Vector3>();
-        List<Vector3> normals = new List<Vector3>();
-        List<int> triangles = new List<int>();
-        Vector3 half = new Vector3(pixelSize, pixelSize, depth) / 2;
-
-        for (int r = 0; r < height; r++)
+        for (int row = 0; row < height; row++)
         {
-            for (int c = 0; c < rows[r].Length; c++)
+            for (int col = 0; col < rows[row].Length; col++)
             {
-                if (rows[r][c] != cell)
+                if (rows[row][col] != cell)
                 {
                     continue;
                 }
-                Vector3 center = new Vector3((c - (width - 1) / 2f) * pixelSize, ((height - 1) / 2f - r) * pixelSize, 0);
 
-                foreach (Vector3 n in directions)
-                {
-                    // Rows go downward, so a neighbor "up" is in the previous row.
-                    if (n.z == 0 && IsFilled(rows, cell, r - (int)n.y, c + (int)n.x))
-                    {
-                        continue;
-                    }
-                    Vector3 u = n.x != 0 ? Vector3.up : Vector3.right;
-                    Vector3 v = n.z != 0 ? Vector3.up : Vector3.forward;
-                    Vector3 faceCenter = center + Vector3.Scale(n, half);
-                    Vector3 du = Vector3.Scale(u, half), dv = Vector3.Scale(v, half);
+                // Center the picture on (0, 0). Row 0 is the top, so y goes down as row goes up.
+                float x = (col - (width - 1) / 2f) * pixelSize;
+                float y = ((height - 1) / 2f - row) * pixelSize;
 
-                    int start = vertices.Count;
-                    vertices.Add(faceCenter - du - dv);
-                    vertices.Add(faceCenter + du - dv);
-                    vertices.Add(faceCenter + du + dv);
-                    vertices.Add(faceCenter - du + dv);
-                    for (int i = 0; i < 4; i++)
-                    {
-                        normals.Add(n);
-                    }
-
-                    // Unity draws a triangle's front side when its corners wind clockwise as seen from the front.
-                    bool facesOut = Vector3.Dot(Vector3.Cross(vertices[start + 1] - vertices[start], vertices[start + 2] - vertices[start]), n) > 0;
-                    if (facesOut)
-                    {
-                        triangles.AddRange(new[] { start, start + 1, start + 2, start, start + 2, start + 3 });
-                    }
-                    else
-                    {
-                        triangles.AddRange(new[] { start, start + 2, start + 1, start, start + 3, start + 2 });
-                    }
-                }
+                CombineInstance piece = new CombineInstance();
+                piece.mesh = cube;
+                piece.transform = Matrix4x4.TRS(new Vector3(x, y, 0), Quaternion.identity, new Vector3(pixelSize, pixelSize, depth));
+                cubes.Add(piece);
             }
         }
 
-        // DontSave: these meshes are generated, never written into the scene (also when previewed in the editor).
-        Mesh mesh = new Mesh { name = "Voxel", hideFlags = HideFlags.DontSave };
-        mesh.SetVertices(vertices);
-        mesh.SetNormals(normals);
-        mesh.SetTriangles(triangles, 0);
-        mesh.RecalculateBounds();
-        cache[key] = mesh;
+        // Merge all the cubes into one mesh, so each model is drawn in one go instead of one cube at a time.
+        Mesh mesh = new Mesh();
+        mesh.name = "Voxel";
+        mesh.CombineMeshes(cubes.ToArray());
         return mesh;
-    }
-
-    static bool IsFilled(string[] rows, char cell, int r, int c)
-    {
-        return r >= 0 && r < rows.Length && c >= 0 && c < rows[r].Length && rows[r][c] == cell;
     }
 }

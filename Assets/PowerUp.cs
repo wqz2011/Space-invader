@@ -3,18 +3,9 @@ using TMPro;
 
 public enum PowerUpType { MultiShot, SpeedBoost, RapidFire }
 
-// A spinning crate dropped by destroyed aliens. Catch it with the ship for a temporary buff.
+// A spinning crate that a destroyed alien sometimes drops. Catch it with the ship for a few seconds of a power-up.
 public class PowerUp : MonoBehaviour
 {
-    static readonly Color[] colors =
-    {
-        new Color(1f, .84f, .29f),   // MultiShot
-        new Color(.29f, .89f, 1f),   // SpeedBoost
-        new Color(1f, .42f, .84f),   // RapidFire
-    };
-    static readonly string[] labels = { "M", "S", "R" };
-    static readonly string[] names = { "Multi-shot", "Speed boost", "Rapid fire" };
-
     [Header("Inscribed")]
     public float fallSpeed = 3f;
     public float spinSpeed = 180f;
@@ -25,45 +16,101 @@ public class PowerUp : MonoBehaviour
     public PowerUpType type;
 
     Rigidbody rb;
-    Transform body;
+    Transform crate;
     bool collected = false;
 
-    public static string Describe(PowerUpType type)
+    public static Color GetColor(PowerUpType type)
     {
-        return "<color=#" + ColorUtility.ToHtmlStringRGB(colors[(int)type]) + ">[" + labels[(int)type] + "] " + names[(int)type] + "</color>";
+        if (type == PowerUpType.MultiShot)
+        {
+            return new Color(1f, .84f, .29f);    // yellow
+        }
+        else if (type == PowerUpType.SpeedBoost)
+        {
+            return new Color(.29f, .89f, 1f);    // light blue
+        }
+        else
+        {
+            return new Color(1f, .42f, .84f);    // pink
+        }
     }
 
-    public static PowerUp Spawn(Vector3 position, PowerUpType type)
+    // The letter printed on the crate.
+    public static string GetLetter(PowerUpType type)
     {
-        GameObject root = new GameObject("PowerUp_" + type);
-        root.transform.position = position;
-        root.AddComponent<BoxCollider>().isTrigger = true;
-        Rigidbody rb = root.AddComponent<Rigidbody>();
-        rb.isKinematic = true;
-        rb.useGravity = false;
+        if (type == PowerUpType.MultiShot)
+        {
+            return "M";
+        }
+        else if (type == PowerUpType.SpeedBoost)
+        {
+            return "S";
+        }
+        else
+        {
+            return "R";
+        }
+    }
 
-        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        Destroy(body.GetComponent<Collider>());
-        body.name = "Body";
-        body.transform.SetParent(root.transform, false);
-        body.transform.localScale = Vector3.one * .7f;
-        body.GetComponent<Renderer>().material.color = colors[(int)type];
+    public static string GetName(PowerUpType type)
+    {
+        if (type == PowerUpType.MultiShot)
+        {
+            return "Multi-shot";
+        }
+        else if (type == PowerUpType.SpeedBoost)
+        {
+            return "Speed boost";
+        }
+        else
+        {
+            return "Rapid fire";
+        }
+    }
 
-        GameObject label = new GameObject("Label", typeof(RectTransform));
-        label.transform.SetParent(root.transform, false);
-        label.transform.localPosition = new Vector3(0, 0, -.6f);
-        TextMeshPro text = label.AddComponent<TextMeshPro>();
-        text.text = labels[(int)type];
+    // A colored label like "[M] Multi-shot" for the title screen and the power-up timers.
+    // (<color=#...> is TextMeshPro's way of coloring part of a text.)
+    public static string GetLabel(PowerUpType type)
+    {
+        string colorCode = ColorUtility.ToHtmlStringRGB(GetColor(type));
+        return "<color=#" + colorCode + ">[" + GetLetter(type) + "] " + GetName(type) + "</color>";
+    }
+
+    // Creates a power-up crate at the given position.
+    public static void Spawn(Vector3 position, PowerUpType type)
+    {
+        // The main object: an invisible box that falls and checks if it touches the ship.
+        GameObject powerUpObject = new GameObject("PowerUp_" + type);
+        powerUpObject.transform.position = position;
+        BoxCollider box = powerUpObject.AddComponent<BoxCollider>();
+        box.isTrigger = true;
+        Rigidbody body = powerUpObject.AddComponent<Rigidbody>();
+        body.isKinematic = true;
+        body.useGravity = false;
+
+        // The colored crate you see. It spins on its own, so the letter in front of it stays readable.
+        GameObject crate = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        Destroy(crate.GetComponent<Collider>());
+        crate.name = "Crate";
+        crate.transform.SetParent(powerUpObject.transform, false);
+        crate.transform.localScale = new Vector3(.7f, .7f, .7f);
+        crate.GetComponent<Renderer>().material.color = GetColor(type);
+
+        // The letter in front of the crate.
+        GameObject letter = new GameObject("Letter", typeof(RectTransform));   // text needs a RectTransform
+        letter.transform.SetParent(powerUpObject.transform, false);
+        letter.transform.localPosition = new Vector3(0, 0, -.6f);
+        TextMeshPro text = letter.AddComponent<TextMeshPro>();
+        text.text = GetLetter(type);
         text.fontSize = 5;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
         text.color = Color.black;
         text.rectTransform.sizeDelta = new Vector2(1, 1);
 
-        PowerUp powerUp = root.AddComponent<PowerUp>();
+        PowerUp powerUp = powerUpObject.AddComponent<PowerUp>();
         powerUp.type = type;
-        powerUp.body = body.transform;
-        return powerUp;
+        powerUp.crate = crate.transform;
     }
 
     void Awake()
@@ -76,13 +123,13 @@ public class PowerUp : MonoBehaviour
         rb.MovePosition(rb.position + Vector3.down * fallSpeed * Time.fixedDeltaTime);
         if (rb.position.y < bottomY)
         {
-            Destroy(gameObject);
+            Destroy(gameObject);   // fell off the bottom of the screen
         }
     }
 
     void Update()
     {
-        body.Rotate(new Vector3(1, 1, 0) * spinSpeed * Time.deltaTime, Space.Self);
+        crate.Rotate(new Vector3(1, 1, 0) * spinSpeed * Time.deltaTime);
     }
 
     void OnTriggerEnter(Collider other)
@@ -92,9 +139,10 @@ public class PowerUp : MonoBehaviour
         {
             return;
         }
-        collected = true;
+        collected = true;   // the ship has several colliders, so only collect once
+
         ship.ApplyPowerUp(type, duration);
-        Explosion.Spawn(transform.position, colors[(int)type], .6f);
+        Explosion.Spawn(transform.position, GetColor(type), .6f);
         Destroy(gameObject);
     }
 }

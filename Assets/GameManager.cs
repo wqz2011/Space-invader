@@ -7,27 +7,36 @@ using TMPro;
 
 public enum GameState { Title, Playing, Won, Lost }
 
-// Owns the title / win / lose screens and the overall flow of a round.
+// Runs the title screen, the win and game-over screens, and keeps track of what state the game is in.
 public class GameManager : MonoBehaviour
 {
-    public static GameManager Instance { get; private set; }
+    // Lets other scripts reach the GameManager with GameManager.Instance.
+    public static GameManager Instance;
 
-    // True when there is no GameManager in the scene, so the gameplay scripts still work on their own.
-    public static bool IsPlaying => Instance == null || Instance.state == GameState.Playing;
-
-    // Set before reloading the scene so "play again" skips the title screen.
+    // Set before reloading the scene for "play again", so we skip the title screen.
     static bool skipTitle = false;
 
     [Header("Inscribed")]
-    public float endScreenDelay = 1.5f;
+    public float endScreenDelay = 1.5f;   // seconds to watch the last explosion before the end screen
 
     [Header("Dynamic")]
     public GameState state = GameState.Title;
 
-    GameObject overlay;
+    GameObject overlay;              // the dark screen behind the title / end text
     TextMeshProUGUI overlayText;
-    TextMeshProUGUI buffText;
-    float roundStartTime;
+    TextMeshProUGUI powerUpText;     // the active power-ups in the top-right corner
+    float startTime;
+
+    // Other scripts ask this before doing anything (like moving or shooting).
+    public static bool IsPlaying()
+    {
+        // No GameManager in the scene? Then just let the game run.
+        if (Instance == null)
+        {
+            return true;
+        }
+        return Instance.state == GameState.Playing;
+    }
 
     void Awake()
     {
@@ -36,27 +45,27 @@ public class GameManager : MonoBehaviour
 
     void Start()
     {
-        Starfield.Create();
+        Background.Create();
         BuildUI();
 
         if (skipTitle)
         {
             skipTitle = false;
             StartGame();
+            return;
         }
-        else
-        {
-            state = GameState.Title;
-            Time.timeScale = 0;
-            ShowOverlay(
-                "<size=110><b>SPACE INVADERS <color=#00FA9A>3D</color></b></size>\n\n" +
-                "<size=40>LEFT / RIGHT (or A / D) to move     SPACE to fire</size>\n\n" +
-                "<size=34>Destroyed aliens sometimes drop power-ups:\n" +
-                PowerUp.Describe(PowerUpType.MultiShot) + "     " +
-                PowerUp.Describe(PowerUpType.SpeedBoost) + "     " +
-                PowerUp.Describe(PowerUpType.RapidFire) + "</size>\n\n" +
-                "<size=50>Press SPACE or ENTER to start</size>");
-        }
+
+        // Show the title screen. Time.timeScale = 0 freezes everything until the player starts.
+        state = GameState.Title;
+        Time.timeScale = 0;
+        ShowOverlay(
+            "<size=110><b>SPACE INVADERS <color=#00FA9A>3D</color></b></size>\n\n" +
+            "<size=40>LEFT / RIGHT (or A / D) to move     SPACE to fire</size>\n\n" +
+            "<size=34>Destroyed aliens sometimes drop power-ups:\n" +
+            PowerUp.GetLabel(PowerUpType.MultiShot) + "     " +
+            PowerUp.GetLabel(PowerUpType.SpeedBoost) + "     " +
+            PowerUp.GetLabel(PowerUpType.RapidFire) + "</size>\n\n" +
+            "<size=50>Press SPACE or ENTER to start</size>");
     }
 
     void Update()
@@ -67,13 +76,16 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        bool confirm = keyboard.spaceKey.wasPressedThisFrame || keyboard.enterKey.wasPressedThisFrame;
-        if (state == GameState.Title && confirm)
+        bool startPressed = keyboard.spaceKey.wasPressedThisFrame || keyboard.enterKey.wasPressedThisFrame;
+
+        if (state == GameState.Title && startPressed)
         {
             StartGame();
         }
-        else if ((state == GameState.Won || state == GameState.Lost) && overlay.activeSelf
-                 && (confirm || keyboard.rKey.wasPressedThisFrame))
+
+        // On the win / game-over screen, start a new game.
+        bool gameOver = state == GameState.Won || state == GameState.Lost;
+        if (gameOver && overlay.activeSelf && (startPressed || keyboard.rKey.wasPressedThisFrame))
         {
             skipTitle = true;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
@@ -85,9 +97,9 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    // Application.Quit is ignored inside the Unity editor, so there Esc stops Play mode instead.
-    static void Quit()
+    void Quit()
     {
+        // Application.Quit doesn't do anything inside the Unity editor, so there we stop Play mode instead.
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
@@ -99,7 +111,7 @@ public class GameManager : MonoBehaviour
     {
         state = GameState.Playing;
         Time.timeScale = 1;
-        roundStartTime = Time.time;
+        startTime = Time.time;
         overlay.SetActive(false);
     }
 
@@ -110,9 +122,12 @@ public class GameManager : MonoBehaviour
             return;
         }
         state = GameState.Won;
+
+        int seconds = Mathf.FloorToInt(Time.time - startTime);
+        string time = (seconds / 60) + ":" + (seconds % 60).ToString("00");
         StartCoroutine(ShowEndScreen(
             "<size=110><b><color=#00FA9A>YOU WIN!</color></b></size>\n\n" +
-            "<size=44>Every alien destroyed in " + FormatTime(Time.time - roundStartTime) + "</size>"));
+            "<size=44>Every alien destroyed in " + time + "</size>"));
     }
 
     public void Lose(string reason)
@@ -122,21 +137,25 @@ public class GameManager : MonoBehaviour
             return;
         }
         state = GameState.Lost;
+
+        string message = "<size=110><b><color=#FF4A4A>GAME OVER</color></b></size>\n\n<size=44>" + reason + "</size>";
         AlienFleet fleet = FindAnyObjectByType<AlienFleet>();
-        string remaining = fleet != null ? "\n<size=36>Aliens remaining: " + fleet.aliens.Count + "</size>" : "";
-        StartCoroutine(ShowEndScreen(
-            "<size=110><b><color=#FF4A4A>GAME OVER</color></b></size>\n\n" +
-            "<size=44>" + reason + "</size>" + remaining));
+        if (fleet != null)
+        {
+            message += "\n<size=36>Aliens remaining: " + fleet.aliens.Count + "</size>";
+        }
+        StartCoroutine(ShowEndScreen(message));
     }
 
-    public void SetBuffText(string text)
+    public void SetPowerUpText(string text)
     {
-        buffText.text = text;
+        powerUpText.text = text;
     }
 
-    // Lets the final explosion play before freezing the game behind the end screen.
+    // Waits a moment so the last explosion can play, then freezes the game and shows the end screen.
     IEnumerator ShowEndScreen(string message)
     {
+        // "Realtime", because this should still count seconds even if the game is frozen.
         yield return new WaitForSecondsRealtime(endScreenDelay);
         Time.timeScale = 0;
         ShowOverlay(message + "\n\n<size=50>Press SPACE or ENTER to play again</size>\n<size=30>ESC to quit</size>");
@@ -148,44 +167,45 @@ public class GameManager : MonoBehaviour
         overlay.SetActive(true);
     }
 
-    static string FormatTime(float seconds)
-    {
-        int whole = Mathf.FloorToInt(seconds);
-        return (whole / 60) + ":" + (whole % 60).ToString("00");
-    }
-
+    // Makes the title / end screen and the power-up text, inside the Canvas that's already in the scene.
     void BuildUI()
     {
         Transform canvas = FindAnyObjectByType<Canvas>().transform;
 
-        overlay = new GameObject("Overlay", typeof(RectTransform), typeof(Image));
+        // A see-through black panel that covers the whole screen.
+        // UI objects use a RectTransform instead of a normal Transform.
+        overlay = new GameObject("Overlay", typeof(RectTransform));
         overlay.transform.SetParent(canvas, false);
-        Stretch(overlay.GetComponent<RectTransform>(), Vector2.zero, Vector2.one);
-        overlay.GetComponent<Image>().color = new Color(0, 0, 0, .75f);
+        Image panel = overlay.AddComponent<Image>();
+        panel.color = new Color(0, 0, 0, .75f);
+        FillArea(panel.rectTransform, 0, 0, 1, 1);
 
-        overlayText = CreateText("OverlayText", overlay.transform, TextAlignmentOptions.Center);
-        Stretch(overlayText.rectTransform, Vector2.zero, Vector2.one);
+        overlayText = MakeText("OverlayText", overlay.transform);
+        overlayText.alignment = TextAlignmentOptions.Center;
+        FillArea(overlayText.rectTransform, 0, 0, 1, 1);
 
-        buffText = CreateText("PowerUpText", canvas, TextAlignmentOptions.TopRight);
-        buffText.fontSize = 32;
-        Stretch(buffText.rectTransform, new Vector2(.5f, .8f), Vector2.one);
-        buffText.rectTransform.offsetMax = new Vector2(-20, -20);
+        // Power-up timers in the top-right corner.
+        powerUpText = MakeText("PowerUpText", canvas);
+        powerUpText.alignment = TextAlignmentOptions.TopRight;
+        powerUpText.fontSize = 32;
+        FillArea(powerUpText.rectTransform, .5f, .8f, 1, 1);
+        powerUpText.rectTransform.offsetMax = new Vector2(-20, -20);   // 20 pixels in from the corner
     }
 
-    static TextMeshProUGUI CreateText(string name, Transform parent, TextAlignmentOptions alignment)
+    TextMeshProUGUI MakeText(string name, Transform parent)
     {
-        GameObject go = new GameObject(name, typeof(RectTransform));
-        go.transform.SetParent(parent, false);
-        TextMeshProUGUI text = go.AddComponent<TextMeshProUGUI>();
-        text.alignment = alignment;
+        GameObject textObject = new GameObject(name, typeof(RectTransform));
+        textObject.transform.SetParent(parent, false);
+        TextMeshProUGUI text = textObject.AddComponent<TextMeshProUGUI>();
         text.raycastTarget = false;
         return text;
     }
 
-    static void Stretch(RectTransform rect, Vector2 anchorMin, Vector2 anchorMax)
+    // Stretches a UI element over part of the screen. (0, 0) is the bottom-left, (1, 1) is the top-right.
+    void FillArea(RectTransform rect, float minX, float minY, float maxX, float maxY)
     {
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
+        rect.anchorMin = new Vector2(minX, minY);
+        rect.anchorMax = new Vector2(maxX, maxY);
         rect.offsetMin = Vector2.zero;
         rect.offsetMax = Vector2.zero;
     }

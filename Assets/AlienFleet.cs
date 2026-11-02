@@ -12,22 +12,18 @@ public class AlienFleet : MonoBehaviour
     public float spacing = 2f;
     public float firstRowHeight = 8f;
 
-    // Speeds are in units per second (the old code moved .1 units per physics step = 5 units/sec).
-    public float baseSpeed = 4f;
-    // The last surviving alien moves this many times faster than the full fleet.
-    public float maxSpeedMultiplier = 5f;
-    public float dropDistance = .6f;
-    public float edgeMargin = 1f;
-    // Seconds between animation poses at base speed; poses switch faster as the fleet speeds up.
-    public float poseInterval = .5f;
+    // Speeds are in units per second.
+    public float baseSpeed = 4f;            // speed with the whole fleet alive
+    public float maxSpeedMultiplier = 5f;   // the last alien moves this many times faster
+    public float dropDistance = .6f;        // how far the fleet moves down at each edge
+    public float edgeMargin = 1f;           // how close to the screen edge the fleet gets
+    public float poseTime = .5f;            // seconds between walking poses (at base speed)
 
     [Header("Firing")]
-    // Shots per second for the whole fleet, rising as the fleet shrinks.
-    public float minShotsPerSecond = 1.2f;
-    public float maxShotsPerSecond = 2.5f;
-    // Fraction of shots fired from the column closest to the player instead of a random column.
+    public float minShotsPerSecond = 1.2f;  // with the whole fleet alive
+    public float maxShotsPerSecond = 2.5f;  // with almost every alien destroyed
     [Range(0, 1)]
-    public float aimedShotChance = .35f;
+    public float aimedShotChance = .35f;    // chance a shot comes from right above the player
 
     [Range(0, 1)]
     public float powerUpDropChance = .08f;
@@ -36,97 +32,111 @@ public class AlienFleet : MonoBehaviour
     public List<Alien> aliens = new List<Alien>();
 
     int startingCount;
-    float direction = 1;
-    float dropRemaining = 0;
-    float invasionLineY = float.NegativeInfinity;
-    Vector2 alienHalfSize;
+    float direction = 1;           // 1 = moving right, -1 = moving left
+    float dropLeft = 0;            // how much further down the fleet still has to move
+    float landingHeight = -1000;   // if the bottom of the fleet reaches this, the player loses
+    float alienHalfWidth = 0;
+    float alienHalfHeight = 0;
     Transform ship;
     int pose = 0;
     float poseTimer = 0;
 
     void Start()
     {
-        // Aliens are children of the fleet so the whole fleet can be moved with a single transform.
-        for (int i = 0; i < columns; i++)
+        // Build the two pose meshes for each kind of alien once, and share them between all the aliens.
+        Alien prefabAlien = alienPrefab.GetComponent<Alien>();
+        Mesh[] squidMeshes = prefabAlien.MakePoseMeshes(AlienType.Squid);
+        Mesh[] crabMeshes = prefabAlien.MakePoseMeshes(AlienType.Crab);
+        Mesh[] octopusMeshes = prefabAlien.MakePoseMeshes(AlienType.Octopus);
+
+        for (int col = 0; col < columns; col++)
         {
-            for (int j = 0; j < rows; j++)
+            for (int row = 0; row < rows; row++)
             {
-                Alien alien = Instantiate(alienPrefab, transform).GetComponent<Alien>();
-                alien.transform.localPosition = SlotPosition(i, j);
-                alien.Init(this, i, TypeForRow(j));
+                AlienType type = GetTypeForRow(row);
+                Mesh[] meshes = squidMeshes;
+                if (type == AlienType.Crab)
+                {
+                    meshes = crabMeshes;
+                }
+                else if (type == AlienType.Octopus)
+                {
+                    meshes = octopusMeshes;
+                }
+
+                // The aliens are children of the fleet, so moving the fleet moves all of them at once.
+                GameObject alienObject = Instantiate(alienPrefab, transform);
+                alienObject.transform.localPosition = GetStartPosition(col, row);
+                Alien alien = alienObject.GetComponent<Alien>();
+                alien.Setup(this, col, type, meshes);
                 aliens.Add(alien);
 
-                Vector2 halfSize = alien.HalfSize;
-                alienHalfSize = Vector2.Max(alienHalfSize, halfSize);
+                // Remember the biggest alien size, for finding the edges of the fleet later.
+                Vector3 halfSize = alien.GetHalfSize();
+                if (halfSize.x > alienHalfWidth)
+                {
+                    alienHalfWidth = halfSize.x;
+                }
+                if (halfSize.y > alienHalfHeight)
+                {
+                    alienHalfHeight = halfSize.y;
+                }
             }
         }
         startingCount = aliens.Count;
         alienCounter.SetCount(aliens.Count);
 
-        // Once the bottom of the fleet reaches the top of the ship, the ship can no longer survive.
+        // Once the bottom of the fleet gets down to the top of the ship, the player can't win anymore.
         Spaceship spaceship = FindAnyObjectByType<Spaceship>();
         if (spaceship != null)
         {
             ship = spaceship.transform;
-            float shipTop = float.NegativeInfinity;
-            foreach (Renderer r in spaceship.GetComponentsInChildren<Renderer>())
+            foreach (Renderer part in spaceship.GetComponentsInChildren<Renderer>())
             {
-                shipTop = Mathf.Max(shipTop, r.bounds.max.y);
-            }
-            invasionLineY = shipTop;
-        }
-    }
-
-    // Starting position of the alien in column i, row j, relative to the fleet.
-    public Vector3 SlotPosition(int i, int j)
-    {
-        return new Vector3((i - (columns - 1) / 2f) * spacing, firstRowHeight - j * spacing, 0);
-    }
-
-    // Arcade layout: squids on top, crabs in the middle, octopuses at the bottom.
-    public AlienType TypeForRow(int j)
-    {
-        return j == 0 ? AlienType.Squid : j <= rows / 2 ? AlienType.Crab : AlienType.Octopus;
-    }
-
-    float DestroyedFraction => 1 - (float)aliens.Count / startingCount;
-
-    public float CurrentSpeed => baseSpeed * Mathf.Lerp(1, maxSpeedMultiplier, DestroyedFraction);
-
-    // Only the lowest alien in a column fires, like the original arcade game, so shots never come
-    // from behind the front line. Some shots are aimed at the column above the player.
-    void TryFire()
-    {
-        float shotsPerSecond = Mathf.Lerp(minShotsPerSecond, maxShotsPerSecond, DestroyedFraction);
-        if (Random.value >= shotsPerSecond * Time.fixedDeltaTime)
-        {
-            return;
-        }
-
-        int column = aliens[Random.Range(0, aliens.Count)].column;
-        if (ship != null && Random.value < aimedShotChance)
-        {
-            float closest = float.MaxValue;
-            foreach (Alien alien in aliens)
-            {
-                float distance = Mathf.Abs(alien.transform.position.x - ship.position.x);
-                if (distance < closest)
+                if (part.bounds.max.y > landingHeight)
                 {
-                    closest = distance;
-                    column = alien.column;
+                    landingHeight = part.bounds.max.y;
                 }
             }
         }
+    }
 
-        Alien shooter = null;
-        foreach (Alien alien in aliens)
+    // Where the alien in this column and row starts, relative to the fleet.
+    public Vector3 GetStartPosition(int col, int row)
+    {
+        float x = (col - (columns - 1) / 2f) * spacing;
+        float y = firstRowHeight - row * spacing;
+        return new Vector3(x, y, 0);
+    }
+
+    // Like the arcade game: squids on the top row, crabs in the middle, octopuses at the bottom.
+    public AlienType GetTypeForRow(int row)
+    {
+        if (row == 0)
         {
-            if (alien.column == column && (shooter == null || alien.transform.position.y < shooter.transform.position.y))
-            {
-                shooter = alien;
-            }
+            return AlienType.Squid;
         }
-        shooter.Shoot();
+        else if (row <= rows / 2)
+        {
+            return AlienType.Crab;
+        }
+        else
+        {
+            return AlienType.Octopus;
+        }
+    }
+
+    // 0 with the whole fleet alive, close to 1 when almost every alien is destroyed.
+    float GetFractionDestroyed()
+    {
+        return 1f - (float)aliens.Count / startingCount;
+    }
+
+    // The fleet speeds up as aliens are destroyed.
+    // (Mathf.Lerp goes from the first number to the second as the last number goes from 0 to 1.)
+    public float GetSpeed()
+    {
+        return baseSpeed * Mathf.Lerp(1, maxSpeedMultiplier, GetFractionDestroyed());
     }
 
     void FixedUpdate()
@@ -136,44 +146,151 @@ public class AlienFleet : MonoBehaviour
             return;
         }
 
-        float step = CurrentSpeed * Time.fixedDeltaTime;
-        if (dropRemaining > 0)
+        MoveFleet();
+        TurnAroundAtEdges();
+        FireAtPlayer();
+        AnimateAliens();
+        CheckIfLanded();
+    }
+
+    void MoveFleet()
+    {
+        float step = GetSpeed() * Time.fixedDeltaTime;
+
+        if (dropLeft > 0)
         {
-            float drop = Mathf.Min(step, dropRemaining);
+            // Still moving down after hitting an edge.
+            float drop = Mathf.Min(step, dropLeft);
             transform.position += Vector3.down * drop;
-            dropRemaining -= drop;
+            dropLeft -= drop;
         }
         else
         {
             transform.position += Vector3.right * direction * step;
         }
+    }
 
-        // Find the fleet's current extents in a single pass.
-        float left = float.MaxValue, right = float.MinValue, bottom = float.MaxValue;
+    void TurnAroundAtEdges()
+    {
+        if (dropLeft > 0)
+        {
+            return;
+        }
+
+        // Find the left-most and right-most points of the fleet.
+        float left = 1000;
+        float right = -1000;
         foreach (Alien alien in aliens)
         {
-            Vector3 position = alien.transform.position;
-            left = Mathf.Min(left, position.x - alienHalfSize.x);
-            right = Mathf.Max(right, position.x + alienHalfSize.x);
-            bottom = Mathf.Min(bottom, position.y - alienHalfSize.y);
+            float x = alien.transform.position.x;
+            if (x - alienHalfWidth < left)
+            {
+                left = x - alienHalfWidth;
+            }
+            if (x + alienHalfWidth > right)
+            {
+                right = x + alienHalfWidth;
+            }
         }
 
+        // The edges of what the camera can see.
         Camera cam = Camera.main;
-        float halfWidth = cam.orthographicSize * cam.aspect;
-        float leftBound = cam.transform.position.x - halfWidth + edgeMargin;
-        float rightBound = cam.transform.position.x + halfWidth - edgeMargin;
-        if (dropRemaining <= 0 && (direction > 0 && right >= rightBound || direction < 0 && left <= leftBound))
+        float halfScreenWidth = cam.orthographicSize * cam.aspect;
+        float leftEdge = cam.transform.position.x - halfScreenWidth + edgeMargin;
+        float rightEdge = cam.transform.position.x + halfScreenWidth - edgeMargin;
+
+        bool hitRightEdge = direction > 0 && right >= rightEdge;
+        bool hitLeftEdge = direction < 0 && left <= leftEdge;
+        if (hitRightEdge || hitLeftEdge)
         {
             direction = -direction;
-            dropRemaining = dropDistance;
+            dropLeft = dropDistance;
+        }
+    }
+
+    // Only the lowest alien in a column can shoot (like the arcade game), so shots always
+    // come from the front of the fleet. Some shots come from the column right above the player.
+    void FireAtPlayer()
+    {
+        float shotsPerSecond = Mathf.Lerp(minShotsPerSecond, maxShotsPerSecond, GetFractionDestroyed());
+        if (Random.value >= shotsPerSecond * Time.fixedDeltaTime)
+        {
+            return;   // no shot this physics step
         }
 
-        TryFire();
-        Animate();
-
-        if (bottom <= invasionLineY)
+        // Pick a column: usually a random one, sometimes the one closest to the player.
+        int column = aliens[Random.Range(0, aliens.Count)].column;
+        if (ship != null && Random.value < aimedShotChance)
         {
-            enabled = false;
+            float closestDistance = 1000;
+            foreach (Alien alien in aliens)
+            {
+                float distance = Mathf.Abs(alien.transform.position.x - ship.position.x);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    column = alien.column;
+                }
+            }
+        }
+
+        // Find the lowest alien in that column and let it shoot.
+        Alien shooter = null;
+        foreach (Alien alien in aliens)
+        {
+            if (alien.column != column)
+            {
+                continue;
+            }
+            if (shooter == null || alien.transform.position.y < shooter.transform.position.y)
+            {
+                shooter = alien;
+            }
+        }
+        shooter.Shoot();
+    }
+
+    // Switch every alien between its two walking poses. They walk faster as the fleet speeds up.
+    void AnimateAliens()
+    {
+        poseTimer += Time.fixedDeltaTime;
+        float timeBetweenPoses = poseTime * baseSpeed / GetSpeed();
+        if (poseTimer < timeBetweenPoses)
+        {
+            return;
+        }
+
+        poseTimer = 0;
+        if (pose == 0)
+        {
+            pose = 1;
+        }
+        else
+        {
+            pose = 0;
+        }
+        foreach (Alien alien in aliens)
+        {
+            alien.SetPose(pose);
+        }
+    }
+
+    void CheckIfLanded()
+    {
+        // Find the lowest point of the fleet.
+        float bottom = 1000;
+        foreach (Alien alien in aliens)
+        {
+            float alienBottom = alien.transform.position.y - alienHalfHeight;
+            if (alienBottom < bottom)
+            {
+                bottom = alienBottom;
+            }
+        }
+
+        if (bottom <= landingHeight)
+        {
+            enabled = false;   // stop the fleet
             if (GameManager.Instance != null)
             {
                 GameManager.Instance.Lose("The aliens have landed!");
@@ -181,30 +298,17 @@ public class AlienFleet : MonoBehaviour
         }
     }
 
-    // Flips every alien between its two poses, faster as the fleet speeds up.
-    void Animate()
-    {
-        poseTimer += Time.fixedDeltaTime;
-        if (poseTimer < poseInterval * baseSpeed / CurrentSpeed)
-        {
-            return;
-        }
-        poseTimer = 0;
-        pose = 1 - pose;
-        foreach (Alien alien in aliens)
-        {
-            alien.SetPose(pose);
-        }
-    }
-
+    // Called by an alien when it's destroyed.
     public void AlienDestroyed(Alien alien)
     {
         aliens.Remove(alien);
         alienCounter.SetCount(aliens.Count);
 
+        // Sometimes drop a power-up of a random kind.
         if (Random.value < powerUpDropChance)
         {
-            PowerUp.Spawn(alien.transform.position, (PowerUpType)Random.Range(0, 3));
+            PowerUpType type = (PowerUpType)Random.Range(0, 3);
+            PowerUp.Spawn(alien.transform.position, type);
         }
 
         if (aliens.Count == 0 && GameManager.Instance != null)

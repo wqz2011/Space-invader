@@ -7,7 +7,7 @@ public class Dart : MonoBehaviour
     public float maxDistance = 25f;
 
     [Header("Dynamic")]
-    // Set once the dart has hit something, so one dart can't destroy two targets in the same physics step.
+    // Set to true once the dart hits something, so one dart can't destroy two things at once.
     public bool spent = false;
 
     Rigidbody rb;
@@ -21,9 +21,12 @@ public class Dart : MonoBehaviour
 
     void FixedUpdate()
     {
-        // Darts fly along their own "up" so multi-shot darts can be fired at an angle.
+        // Fly in the direction the dart is pointing ("up" for the dart).
+        // Normally that's straight up, but multi-shot darts are fired at an angle.
         rb.MovePosition(rb.position + transform.up * speed * Time.fixedDeltaTime);
-        if ((rb.position - startPosition).sqrMagnitude > maxDistance * maxDistance)
+
+        // Remove the dart once it has flown off the screen.
+        if (Vector3.Distance(rb.position, startPosition) > maxDistance)
         {
             Destroy(gameObject);
         }

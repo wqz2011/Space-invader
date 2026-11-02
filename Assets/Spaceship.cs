@@ -3,8 +3,8 @@ using UnityEngine.InputSystem;
 
 public class Spaceship : MonoBehaviour
 {
-    // Pixel-art fighter: X = hull, C = cockpit, R = wing lights, E = engine glow.
-    static readonly string[] shape =
+    // Pixel art for the ship: X = hull, C = cockpit, R = red wing lights, E = engine glow.
+    static string[] shape =
     {
         "......X......",
         ".....XCX.....",
@@ -20,8 +20,7 @@ public class Spaceship : MonoBehaviour
 
     [Header("Inscribed")]
     public GameObject dartPrefab;
-    // Same pixel size as the aliens, so everything shares one pixel-art scale.
-    public float pixelSize = .14f;
+    public float pixelSize = .14f;   // same as the aliens, so everything looks like the same pixel art
     public float depth = .35f;
     public Color hullTint = new Color(.85f, .88f, .95f);
 
@@ -36,84 +35,112 @@ public class Spaceship : MonoBehaviour
     [Header("Dynamic")]
     public float lastShot = -1;
 
-    float multiShotUntil, speedBoostUntil, rapidFireUntil;
-    int lastBuffDisplay = -1;
+    // The time (Time.time) when each power-up runs out.
+    float multiShotEndTime = 0;
+    float speedBoostEndTime = 0;
+    float rapidFireEndTime = 0;
 
-    // How far the ship's model reaches left, right and up from its pivot.
-    float leftExtent, rightExtent, noseOffset;
-    Color hullColor = Color.white;
-    bool destroyed = false;
+    // The seconds last shown for each power-up, so the text only changes when a number changes.
+    int lastMultiShotSeconds = -1;
+    int lastSpeedBoostSeconds = -1;
+    int lastRapidFireSeconds = -1;
+
+    // How far the ship's model reaches to the left, right and up from its center.
+    float leftSize;
+    float rightSize;
+    float noseHeight;
+
     Material engineMaterial;
+    bool destroyed = false;
 
-    // Built in Awake so the fleet sees the new model when it measures the ship in its Start.
+    // The new model is built in Awake (not Start), so it already exists when the fleet measures the ship in its Start.
     void Awake()
     {
-        Material prefabHull = PrefabHullMaterial;
+        Material originalMaterial = GetOriginalMaterial();
 
-        // Remove the old capsule parts. Deactivate them first because Destroy only happens at the end of the frame.
+        // Remove the prefab's old capsule parts. Hide them first, because Destroy only happens at the end of the frame.
         foreach (Transform child in transform)
         {
             child.gameObject.SetActive(false);
             Destroy(child.gameObject);
         }
 
-        engineMaterial = BuildModel(transform, prefabHull);
-        // The ship's hitbox; uses the kinematic Rigidbody on the root.
+        engineMaterial = BuildModel(transform, originalMaterial);
+
+        // The ship's hitbox. It works with the Rigidbody on the ship.
         transform.Find("Hull").gameObject.AddComponent<BoxCollider>();
     }
 
-    // The material on the prefab's original capsule parts, used as the base for the voxel parts' materials.
-    public Material PrefabHullMaterial => GetComponentInChildren<Renderer>(true).sharedMaterial;
-
-    // Builds the voxel fighter's parts under `parent` and returns the engine material (so it can flicker).
-    // Also used by EditModePreview to show the ship before the game runs.
-    public Material BuildModel(Transform parent, Material baseMaterial)
+    // The material on the prefab's capsule parts. The new model's colors start from it.
+    public Material GetOriginalMaterial()
     {
-        AddModelPart(parent, "Hull", 'X', new Material(baseMaterial) { color = hullTint });
-        AddModelPart(parent, "Cockpit", 'C', new Material(baseMaterial) { color = new Color(.25f, .85f, 1f) });
-        AddModelPart(parent, "WingLights", 'R', new Material(baseMaterial) { color = new Color(1f, .25f, .25f) });
+        return GetComponentInChildren<Renderer>(true).sharedMaterial;
+    }
 
-        // Unlit so the engines look like they glow regardless of the scene lighting.
-        Material engines = new Material(Resources.Load<Material>("BackgroundUnlit")) { color = new Color(1f, .6f, .15f) };
+    // Builds the pixel-art ship's parts under "parent" and returns the engine material (so it can flicker).
+    // EditModePreview also uses this to show the ship before the game runs.
+    public Material BuildModel(Transform parent, Material originalMaterial)
+    {
+        AddModelPart(parent, "Hull", 'X', MakeMaterial(originalMaterial, hullTint));
+        AddModelPart(parent, "Cockpit", 'C', MakeMaterial(originalMaterial, new Color(.25f, .85f, 1f)));
+        AddModelPart(parent, "WingLights", 'R', MakeMaterial(originalMaterial, new Color(1f, .25f, .25f)));
+
+        // Unlit, so the engines look like they're glowing no matter how they're lit.
+        Material engines = MakeMaterial(Resources.Load<Material>("BackgroundUnlit"), new Color(1f, .6f, .15f));
         AddModelPart(parent, "Engines", 'E', engines);
         return engines;
     }
 
+    Material MakeMaterial(Material original, Color color)
+    {
+        Material material = new Material(original);
+        material.color = color;
+        return material;
+    }
+
     void AddModelPart(Transform parent, string name, char cell, Material material)
     {
-        GameObject part = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
-        part.layer = gameObject.layer;   // keeps the Spaceship layer's collision rules
+        GameObject part = new GameObject(name);
+        part.layer = gameObject.layer;   // keep the Spaceship layer, so the collision rules stay the same
         part.transform.SetParent(parent, false);
-        part.GetComponent<MeshFilter>().sharedMesh = VoxelModel.Build(shape, cell, pixelSize, depth);
-        part.GetComponent<MeshRenderer>().sharedMaterial = material;
+        part.AddComponent<MeshFilter>().sharedMesh = VoxelModel.Build(shape, cell, pixelSize, depth);
+        part.AddComponent<MeshRenderer>().sharedMaterial = material;
     }
 
     void Start()
     {
-        Renderer[] renderers = GetComponentsInChildren<Renderer>();
-        Bounds bounds = renderers[0].bounds;
-        foreach (Renderer r in renderers)
+        // Measure the new model, so we know how close to the screen edge the ship can go
+        // and where the nose is (that's where the darts come out).
+        Renderer[] parts = GetComponentsInChildren<Renderer>();
+        Bounds bounds = parts[0].bounds;
+        foreach (Renderer part in parts)
         {
-            bounds.Encapsulate(r.bounds);
+            bounds.Encapsulate(part.bounds);
         }
-        leftExtent = transform.position.x - bounds.min.x;
-        rightExtent = bounds.max.x - transform.position.x;
-        noseOffset = bounds.max.y - transform.position.y;
-        hullColor = renderers[0].sharedMaterial.color;
+        leftSize = transform.position.x - bounds.min.x;
+        rightSize = bounds.max.x - transform.position.x;
+        noseHeight = bounds.max.y - transform.position.y;
     }
 
     void Update()
     {
-        // Flickering engine glow, between orange and yellow.
+        // Make the engines flicker between orange and yellow.
         float flicker = Mathf.PerlinNoise(Time.unscaledTime * 12f, 0);
         engineMaterial.color = Color.Lerp(new Color(1f, .35f, .05f), new Color(1f, .85f, .3f), flicker);
 
         Keyboard keyboard = Keyboard.current;
-        if (!GameManager.IsPlaying || keyboard == null)
+        if (!GameManager.IsPlaying() || keyboard == null)
         {
             return;
         }
 
+        Move(keyboard);
+        Shoot(keyboard);
+        UpdatePowerUpText();
+    }
+
+    void Move(Keyboard keyboard)
+    {
         float input = 0;
         if (keyboard.rightArrowKey.isPressed || keyboard.dKey.isPressed)
         {
@@ -124,96 +151,135 @@ public class Spaceship : MonoBehaviour
             input -= 1;
         }
 
-        float currentSpeed = Time.time < speedBoostUntil ? speed * speedBoostMultiplier : speed;
-        Vector3 position = transform.position;
-        position.x += input * currentSpeed * Time.deltaTime;
-        position.x = ClampToScreen(position.x);
-        transform.position = position;
-
-        // Rapid fire lets the player simply hold the fire button.
-        bool rapidFire = Time.time < rapidFireUntil;
-        bool firePressed = rapidFire ? keyboard.spaceKey.isPressed : keyboard.spaceKey.wasPressedThisFrame;
-        float cooldown = rapidFire ? rapidFireCooldown : shotCooldown;
-        if (firePressed && Time.time - lastShot > cooldown)
+        float currentSpeed = speed;
+        if (Time.time < speedBoostEndTime)
         {
-            Fire();
+            currentSpeed = speed * speedBoostMultiplier;
         }
 
-        UpdateBuffDisplay();
-    }
+        Vector3 position = transform.position;
+        position.x += input * currentSpeed * Time.deltaTime;
 
-    float ClampToScreen(float x)
-    {
+        // Keep the whole ship on the screen.
         Camera cam = Camera.main;
-        float halfWidth = cam.orthographicSize * cam.aspect;
-        float left = cam.transform.position.x - halfWidth + leftExtent;
-        float right = cam.transform.position.x + halfWidth - rightExtent;
-        return Mathf.Clamp(x, left, right);
+        float halfScreenWidth = cam.orthographicSize * cam.aspect;
+        float leftLimit = cam.transform.position.x - halfScreenWidth + leftSize;
+        float rightLimit = cam.transform.position.x + halfScreenWidth - rightSize;
+        position.x = Mathf.Clamp(position.x, leftLimit, rightLimit);
+
+        transform.position = position;
     }
 
-    void Fire()
+    void Shoot(Keyboard keyboard)
     {
+        // Normally you press Space for each shot. With Rapid Fire you can just hold it down.
+        bool wantsToShoot;
+        float cooldown;
+        if (Time.time < rapidFireEndTime)
+        {
+            wantsToShoot = keyboard.spaceKey.isPressed;
+            cooldown = rapidFireCooldown;
+        }
+        else
+        {
+            wantsToShoot = keyboard.spaceKey.wasPressedThisFrame;
+            cooldown = shotCooldown;
+        }
+
+        if (!wantsToShoot || Time.time - lastShot < cooldown)
+        {
+            return;
+        }
         lastShot = Time.time;
-        Vector3 nose = transform.position + Vector3.up * noseOffset;
+
+        Vector3 nose = transform.position + Vector3.up * noseHeight;
         Instantiate(dartPrefab, nose, Quaternion.identity);
-        if (Time.time < multiShotUntil)
+
+        // Multi-shot adds two more darts, angled to the left and right.
+        if (Time.time < multiShotEndTime)
         {
             Instantiate(dartPrefab, nose, Quaternion.Euler(0, 0, multiShotAngle));
             Instantiate(dartPrefab, nose, Quaternion.Euler(0, 0, -multiShotAngle));
         }
     }
 
+    // Called by a power-up when the ship catches it.
     public void ApplyPowerUp(PowerUpType type, float duration)
     {
-        switch (type)
+        if (type == PowerUpType.MultiShot)
         {
-            case PowerUpType.MultiShot:
-                multiShotUntil = Time.time + duration;
-                break;
-            case PowerUpType.SpeedBoost:
-                speedBoostUntil = Time.time + duration;
-                break;
-            case PowerUpType.RapidFire:
-                rapidFireUntil = Time.time + duration;
-                break;
+            multiShotEndTime = Time.time + duration;
+        }
+        else if (type == PowerUpType.SpeedBoost)
+        {
+            speedBoostEndTime = Time.time + duration;
+        }
+        else if (type == PowerUpType.RapidFire)
+        {
+            rapidFireEndTime = Time.time + duration;
         }
     }
 
-    // Only rebuilds the HUD string when one of the displayed whole-second timers changes.
-    void UpdateBuffDisplay()
+    // Shows the active power-ups and their seconds left in the top-right corner.
+    void UpdatePowerUpText()
     {
-        int multi = SecondsLeft(multiShotUntil), boost = SecondsLeft(speedBoostUntil), rapid = SecondsLeft(rapidFireUntil);
-        int display = multi * 10000 + boost * 100 + rapid;
-        if (display == lastBuffDisplay || GameManager.Instance == null)
+        int multiShotSeconds = SecondsLeft(multiShotEndTime);
+        int speedBoostSeconds = SecondsLeft(speedBoostEndTime);
+        int rapidFireSeconds = SecondsLeft(rapidFireEndTime);
+
+        // Only rebuild the text when one of the numbers has changed, not every frame.
+        if (multiShotSeconds == lastMultiShotSeconds && speedBoostSeconds == lastSpeedBoostSeconds && rapidFireSeconds == lastRapidFireSeconds)
         {
             return;
         }
-        lastBuffDisplay = display;
+        lastMultiShotSeconds = multiShotSeconds;
+        lastSpeedBoostSeconds = speedBoostSeconds;
+        lastRapidFireSeconds = rapidFireSeconds;
 
         string text = "";
-        if (multi > 0) text += PowerUp.Describe(PowerUpType.MultiShot) + "  " + multi + "s\n";
-        if (boost > 0) text += PowerUp.Describe(PowerUpType.SpeedBoost) + "  " + boost + "s\n";
-        if (rapid > 0) text += PowerUp.Describe(PowerUpType.RapidFire) + "  " + rapid + "s\n";
-        GameManager.Instance.SetBuffText(text);
+        if (multiShotSeconds > 0)
+        {
+            text += PowerUp.GetLabel(PowerUpType.MultiShot) + "  " + multiShotSeconds + "s\n";
+        }
+        if (speedBoostSeconds > 0)
+        {
+            text += PowerUp.GetLabel(PowerUpType.SpeedBoost) + "  " + speedBoostSeconds + "s\n";
+        }
+        if (rapidFireSeconds > 0)
+        {
+            text += PowerUp.GetLabel(PowerUpType.RapidFire) + "  " + rapidFireSeconds + "s\n";
+        }
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.SetPowerUpText(text);
+        }
     }
 
-    int SecondsLeft(float until)
+    int SecondsLeft(float endTime)
     {
-        return Mathf.Clamp(Mathf.CeilToInt(until - Time.time), 0, 99);
+        int seconds = Mathf.CeilToInt(endTime - Time.time);
+        if (seconds < 0)
+        {
+            seconds = 0;
+        }
+        return seconds;
     }
 
+    // Called when an alien bullet (or an alien) hits the ship.
     public void Hit()
     {
-        // The ship is made of several colliders, so it can be "hit" more than once in the same step.
+        // The ship has several colliders, so it can be hit more than once in the same physics step.
         if (destroyed)
         {
             return;
         }
         destroyed = true;
-        Explosion.Spawn(transform.position, hullColor, 2.5f);
+
+        Explosion.Spawn(transform.position, hullTint, 2.5f);
         if (GameManager.Instance != null)
         {
-            GameManager.Instance.SetBuffText("");
+            GameManager.Instance.SetPowerUpText("");
             GameManager.Instance.Lose("Your ship was destroyed!");
         }
         Destroy(gameObject);
