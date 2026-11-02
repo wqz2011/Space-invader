@@ -28,7 +28,7 @@
 | Requirement | How it's met | Where |
 |---|---|---|
 | **Make the remaining aliens speed up as their compatriots are destroyed** | Fleet speed grows with the fraction of aliens destroyed: from `baseSpeed` (4 units/s) with a full fleet to `maxSpeedMultiplier` × that (20 units/s) for the last alien. The marching animation also speeds up to match. | `AlienFleet.GetSpeed`, `AlienFleet.AnimateAliens` |
-| **Detect when the aliens have reached a point where the game can no longer be won** | Every physics step the fleet measures its lowest alien. Once the bottom of the fleet reaches the top of the spaceship, the ship can't escape, so the game ends with "GAME OVER – The aliens have landed!". | `AlienFleet.FixedUpdate`, `GameManager.Lose` |
+| **Detect when the aliens have reached a point where the game can no longer be won** | Every physics step the fleet measures its lowest alien. Once the bottom of the fleet reaches the top of the spaceship, the ship can't escape, so the game ends with "GAME OVER – The aliens have landed!". | `AlienFleet.CheckIfLanded`, `GameManager.Lose` |
 | **Prevent the spaceship from moving offscreen** | The ship's x position is clamped to the camera's visible width, minus how far the ship's model extends left and right. It's computed from the camera every frame, so it works at any window size or aspect ratio. | `Spaceship.Move` |
 | **Find at least three ways the code is inefficient, non-idiomatic or poorly written, and fix them** | Six issues were found and fixed (see below). | see [Code issues fixed](#code-issues-found-and-fixed) |
 
@@ -82,7 +82,7 @@ All four are from the assignment's list:
 - **Aliens:** pink **squids** (top row), green **crabs** (middle) and cyan **octopuses** (bottom), each with two poses that alternate as the fleet marches. The hitbox is a box fitted to the shape.
 - **Spaceship:** a voxel fighter with a white hull, cyan cockpit, red wing lights and flickering orange engines. Same pixel size as the aliens. Darts now launch from the nose.
 - **Alien bullets:** bright red, unlit zigzag bolts that wiggle as they fall, easy to see against the dark blue background.
-- **Background:** the pixel-art Earth-and-Moon picture. If that file is missing, the game falls back to drifting parallax stars and a cratered moon.
+- **Background:** the pixel-art Earth-and-Moon picture, placed behind the game by `Background`.
 
 ### Game balancing
 
